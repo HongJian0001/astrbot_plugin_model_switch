@@ -17,6 +17,7 @@ author: 君莫笑
 repo: https://github.com/HongJian0001/astrbot_plugin_model_switch
 help: 发送 /切换主模型 查看可用模型；/切换主模型 状态 体检；/切换主模型 跟随 清除写死模型
 astrbot_version: ">=4.29,<5"
+social_link: https://github.com/HongJian0001
 tags:
   - 模型
   - 切换

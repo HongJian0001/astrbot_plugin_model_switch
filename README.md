@@ -47,6 +47,135 @@ AstrBot WebUI → 插件市场 → 搜索「模型一键切换」→ 安装。
 > 只有主人可用（默认取 `admins_id`，可在插件配置里追加 `owner_ids`）。
 > 注意别和 omnidraw 的 `/切换模型` 搞混。
 
+## 使用示例
+
+### 1. 看看现在有哪些模型
+
+```text
+/切换主模型
+```
+
+```text
+可用对话模型（6 个）：
+1. Balian2 · deepseek-v4.1-flash-1017  tool✓ 图✓  ctx 1M
+2. grok · grok-4.7                     tool✓ 图✓  ctx 1M
+3. grok2 · grok-4.7                    tool✓ 图✓  ctx 500K
+4. grok3 · grok-4.7                    tool✓ 图✗  ctx 未知
+5. deep中转 · deepseek-v4.1-flash      tool✓ 图✓  ctx 1M
+6. deepseek官转 · deepseek-v4.1-flash  tool✓ 图✓  ctx 1M  ← 当前
+
+⚠️ 以下模型的 id 前缀与 UI 里的源名称不一致（AstrBot 重命名源后不会改模型 id，切换仍按 id 生效）：
+  · deepseek官转 → id deepseek/deepseek-v4.1-flash
+回复 /切换主模型 编号 切换；/切换主模型 状态 体检；/切换主模型 跟随 改为跟随主模型；/切换主模型 测试 真发最小请求
+```
+
+### 2. 按编号或名字切换
+
+```text
+/切换主模型 2
+```
+
+```text
+✅ 已切换到 grok-4.7
+生效：全局（私聊+群聊）｜立即生效，无需重启
+
+改动 4 项
+· 主对话链（agent_runner + 运行时）
+· 备用链（fallback_provider_ids）
+· humanoid_core 情绪分析（跟随全局）
+· autonomous_social 主动消息（跟随全局）
+
+跳过 1 项
+· embedding（专用模型，不动）
+
+当前：grok-4.7  tool✓ 图✓  ctx 1M
+备用：deep中转 · deepseek-v4.1-flash
+```
+
+也可以直接叫名字，源名称、模型名都认：
+
+```text
+/切换主模型 deepseek官转
+/切换主模型 grok-4.7
+```
+
+### 3. 切完检查有没有漏网的
+
+```text
+/切换主模型 状态
+```
+
+```text
+📊 模型切换状态
+当前全局：grok · grok-4.7（grok/grok-4.7）
+备用模型：deep中转 · deepseek-v4.1-flash
+跟随全局：3 项（仅启用插件的后台任务）
+写死未跟随：0 项 ✅
+图片描述：跟随主模型（主模型支持图片）
+未启用：livingmemory（已清空，重新启用后跟随全局）
+视觉备用：未配置
+不可切换：embedding（openai_embedding）｜STT/TTS｜rerank｜omnidraw 出图模型（固定，提示词副脑跟随主模型）｜qq_tools 视频模型
+最后切换：2026-11-20 00:15:15 · 心若向阳(2261875776)
+```
+
+有漏网的就直接列出来，并给出修复命令：
+
+```text
+写死未跟随：2 项 ⚠️
+  · humanoid_core 情绪分析=deepseek-v4.1-flash（建议 /切换主模型 跟随）
+  · meme_manager 语义=old/provider-id（建议 /切换主模型 跟随）
+```
+
+### 4. 一次性清掉所有写死模型
+
+适合刚装插件、或刚换过一批 provider 的时候：
+
+```text
+/切换主模型 跟随
+```
+
+```text
+✅ 已改为跟随主模型
+
+改动 5 项
+· humanoid_core 情绪分析（跟随全局）
+· livingmemory 记忆（跟随全局）
+· autonomous_social 主动消息（跟随全局）
+· clonetts 语音识别（跟随全局）
+· 图片描述（跟随主模型）
+
+当前：grok-4.7  tool✓ 图✓  ctx 1M
+备用：deep中转 · deepseek-v4.1-flash
+```
+
+已经全空的话只会回一句「已经是跟随模式，无需改动」，不会白写文件。
+
+### 5. 怀疑某个 provider 不通
+
+```text
+/切换主模型 测试
+```
+
+```text
+✅ 测试成功：grok/grok-4.7 返回 OK
+```
+
+失败时会带上异常类型，方便判断是 key 错了还是网络不通：
+
+```text
+❌ 测试失败：grok/grok-4.7 ConnectError: Connection error.
+```
+
+### 6. 在配置页切换（不用发消息）
+
+WebUI → 插件 → 模型一键切换：
+
+1. 在「一键切换主模型」下拉里选一个 provider
+2. 点保存
+3. 插件自动热切换，并把结果写回「当前主模型 / 配置体检」
+
+配置页那几个信息字段每 2 分钟自动重算一次，所以你在 UI 里增删 provider 之后，不用再手动重载插件。
+
 ## 配置页
 
 - **一键切换主模型**：下拉选 provider，保存即切换

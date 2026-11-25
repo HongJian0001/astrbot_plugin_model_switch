@@ -22,7 +22,7 @@ try:
 except Exception:  # pragma: no cover
     star_map = {}
 
-PLUGIN_ID = "local/astrbot_plugin_model_switch"
+PLUGIN_ID = "君莫笑/astrbot_plugin_model_switch"
 PRIMARY = ("agent_runner", "config", "model", "provider_id")
 FALLBACK = ("agent_runner", "config", "model", "fallback_provider_ids")
 

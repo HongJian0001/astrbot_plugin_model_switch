@@ -1,0 +1,51 @@
+{
+  "switch_provider_id": {
+    "description": "一键切换主模型",
+    "hint": "选择后点击保存，插件会自动热切换全局主模型；等同 /切换主模型 <编号>。",
+    "type": "string",
+    "_special": "select_provider",
+    "default": ""
+  },
+  "current_model_info": {
+    "description": "当前主模型",
+    "type": "string",
+    "readonly": true,
+    "default": ""
+  },
+  "fallback_model_info": {
+    "description": "备用模型",
+    "type": "string",
+    "readonly": true,
+    "default": ""
+  },
+  "drift_summary": {
+    "description": "配置体检",
+    "type": "text",
+    "readonly": true,
+    "default": ""
+  },
+  "last_switch_info": {
+    "description": "最后切换",
+    "type": "string",
+    "readonly": true,
+    "default": ""
+  },
+  "vision_fallback_provider_id": {
+    "description": "视觉备用模型 ID",
+    "hint": "主模型不支持图片时，图片描述使用这个 provider；留空则保留旧值或停用图片描述。",
+    "type": "string",
+    "default": ""
+  },
+  "enabled": {
+    "description": "启用模型切换",
+    "hint": "关闭后 /切换主模型 不响应。",
+    "type": "bool",
+    "default": true
+  },
+  "owner_ids": {
+    "description": "额外主人 QQ",
+    "hint": "逗号分隔；留空时使用 AstrBot 全局管理员列表 admins_id。",
+    "type": "string",
+    "default": ""
+  }
+}

@@ -1,0 +1,23 @@
+name: astrbot_plugin_model_switch
+display_name: 模型一键切换
+short_desc: 配置页直接切换主模型；后台任务默认跟随，自动识别未启用插件
+desc: |
+  用 /切换主模型 列出可用对话模型，按编号一键切换 AstrBot 全局主模型；也可以在插件配置页直接选择 provider 并保存。
+
+  - 配置页显示当前主模型、备用模型、配置体检、最后切换，并提供可切换的模型选择器
+  - 后台文本任务（humanoid_core、livingmemory、autonomous_social、clonetts）默认清空专供模型，改为跟随全局/会话
+  - 图片描述按主模型能力处理：主模型有图则跟随，无图时使用视觉备用或保留旧模型
+  - 未启用插件单独标记，不显示模型名、不计入漂移
+  - 显示用「provider 源名称 · 模型名」；AstrBot 重命名源后模型 id 前缀不一致时给出提示
+  - 配置页信息每 2 分钟自动重算，UI 增删 provider 后无需重载插件
+  - /切换主模型 跟随 一次性清除写死模型；/切换主模型 状态 体检
+  - 自动备份、读回校验、失败全量回滚；embedding/STT/TTS/omnidraw/qq_tools/rerank 不动
+version: 1.2.1
+author: 君莫笑
+repo: https://github.com/HongJian0001/astrbot_plugin_model_switch
+help: 发送 /切换主模型 查看可用模型；/切换主模型 状态 体检；/切换主模型 跟随 清除写死模型
+astrbot_version: ">=4.29,<5"
+tags:
+  - 模型
+  - 切换
+  - 管理

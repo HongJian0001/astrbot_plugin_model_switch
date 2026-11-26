@@ -153,7 +153,7 @@ class ModelSwitchPlugin(Star):
                 continue
             model = str(meta.model or conf.get("model") or pid)
             # AstrBot 重命名 provider 源时只改 provider_source_id，不会改模型 id，
-            # 于是会出现 id=deepseek/xxx、source=deepseek官转 这种前缀对不上的情况。
+            # 于是会出现 id=old-vendor/xxx、source=新名称 这种前缀对不上的情况。
             source = str(conf.get("provider_source_id") or "")
             if not source and "/" in pid:
                 source = pid.split("/", 1)[0]

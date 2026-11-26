@@ -37,7 +37,7 @@ AstrBot WebUI → 插件市场 → 搜索「模型一键切换」→ 安装。
 | --- | --- |
 | `/切换主模型` 或 `/切换主模型 列表` | 列出可用对话模型：源名称 · 模型名、tool/图 支持、上下文长度、当前项 |
 | `/切换主模型 6` | 按编号切换 |
-| `/切换主模型 deepseek官转` | 按名称切换（源名称 / 模型名 / id 模糊匹配） |
+| `/切换主模型 备用通道` | 按名称切换（源名称 / 模型名 / id 模糊匹配） |
 | `/切换主模型 状态` | 体检：当前模型、备用模型、跟随/写死、图片描述策略、未启用插件 |
 | `/切换主模型 跟随` | 清空所有后台任务里写死的模型，改为跟随全局 |
 | `/切换主模型 测试` | 给当前模型真发一个 `ping`，验证通道可用 |
@@ -49,6 +49,8 @@ AstrBot WebUI → 插件市场 → 搜索「模型一键切换」→ 安装。
 
 ## 使用示例
 
+> 下面都是示例数据，模型名和 id 仅用于演示。
+
 ### 1. 看看现在有哪些模型
 
 ```text
@@ -56,16 +58,14 @@ AstrBot WebUI → 插件市场 → 搜索「模型一键切换」→ 安装。
 ```
 
 ```text
-可用对话模型（6 个）：
-1. Balian2 · deepseek-v4.1-flash-1017  tool✓ 图✓  ctx 1M
-2. grok · grok-4.7                     tool✓ 图✓  ctx 1M
-3. grok2 · grok-4.7                    tool✓ 图✓  ctx 500K
-4. grok3 · grok-4.7                    tool✓ 图✗  ctx 未知
-5. deep中转 · deepseek-v4.1-flash      tool✓ 图✓  ctx 1M
-6. deepseek官转 · deepseek-v4.1-flash  tool✓ 图✓  ctx 1M  ← 当前
+可用对话模型（4 个）：
+1. 官方直连 · gpt-4o-mini     tool✓ 图✓  ctx 128K
+2. 备用通道 · claude-sonnet   tool✓ 图✓  ctx 200K
+3. 本地推理 · qwen3-32b       tool✓ 图✗  ctx 32K
+4. 测试线路 · gpt-4o-mini     tool✓ 图✗  ctx 未知  ← 当前
 
 ⚠️ 以下模型的 id 前缀与 UI 里的源名称不一致（AstrBot 重命名源后不会改模型 id，切换仍按 id 生效）：
-  · deepseek官转 → id deepseek/deepseek-v4.1-flash
+  · 测试线路 → id test-line/gpt-4o-mini
 回复 /切换主模型 编号 切换；/切换主模型 状态 体检；/切换主模型 跟随 改为跟随主模型；/切换主模型 测试 真发最小请求
 ```
 
@@ -76,7 +76,7 @@ AstrBot WebUI → 插件市场 → 搜索「模型一键切换」→ 安装。
 ```
 
 ```text
-✅ 已切换到 grok-4.7
+✅ 已切换到 claude-sonnet
 生效：全局（私聊+群聊）｜立即生效，无需重启
 
 改动 4 项
@@ -88,15 +88,15 @@ AstrBot WebUI → 插件市场 → 搜索「模型一键切换」→ 安装。
 跳过 1 项
 · embedding（专用模型，不动）
 
-当前：grok-4.7  tool✓ 图✓  ctx 1M
-备用：deep中转 · deepseek-v4.1-flash
+当前：claude-sonnet  tool✓ 图✓  ctx 200K
+备用：官方直连 · gpt-4o-mini
 ```
 
 也可以直接叫名字，源名称、模型名都认：
 
 ```text
-/切换主模型 deepseek官转
-/切换主模型 grok-4.7
+/切换主模型 备用通道
+/切换主模型 claude-sonnet
 ```
 
 ### 3. 切完检查有没有漏网的
@@ -107,23 +107,23 @@ AstrBot WebUI → 插件市场 → 搜索「模型一键切换」→ 安装。
 
 ```text
 📊 模型切换状态
-当前全局：grok · grok-4.7（grok/grok-4.7）
-备用模型：deep中转 · deepseek-v4.1-flash
+当前全局：备用通道 · claude-sonnet（backup/claude-sonnet）
+备用模型：官方直连 · gpt-4o-mini
 跟随全局：3 项（仅启用插件的后台任务）
 写死未跟随：0 项 ✅
 图片描述：跟随主模型（主模型支持图片）
-未启用：livingmemory（已清空，重新启用后跟随全局）
+未启用：某记忆插件（已清空，重新启用后跟随全局）
 视觉备用：未配置
 不可切换：embedding（openai_embedding）｜STT/TTS｜rerank｜omnidraw 出图模型（固定，提示词副脑跟随主模型）｜qq_tools 视频模型
-最后切换：2026-11-20 00:15:15 · 心若向阳(2261875776)
+最后切换：2026-01-01 12:00:00 · 管理员(100000000)
 ```
 
 有漏网的就直接列出来，并给出修复命令：
 
 ```text
 写死未跟随：2 项 ⚠️
-  · humanoid_core 情绪分析=deepseek-v4.1-flash（建议 /切换主模型 跟随）
-  · meme_manager 语义=old/provider-id（建议 /切换主模型 跟随）
+  · humanoid_core 情绪分析=old-model（建议 /切换主模型 跟随）
+  · meme_manager 语义=old-vendor/old-model（建议 /切换主模型 跟随）
 ```
 
 ### 4. 一次性清掉所有写死模型
@@ -139,13 +139,13 @@ AstrBot WebUI → 插件市场 → 搜索「模型一键切换」→ 安装。
 
 改动 5 项
 · humanoid_core 情绪分析（跟随全局）
-· livingmemory 记忆（跟随全局）
+· 记忆插件（跟随全局）
 · autonomous_social 主动消息（跟随全局）
 · clonetts 语音识别（跟随全局）
 · 图片描述（跟随主模型）
 
-当前：grok-4.7  tool✓ 图✓  ctx 1M
-备用：deep中转 · deepseek-v4.1-flash
+当前：claude-sonnet  tool✓ 图✓  ctx 200K
+备用：官方直连 · gpt-4o-mini
 ```
 
 已经全空的话只会回一句「已经是跟随模式，无需改动」，不会白写文件。
@@ -157,13 +157,13 @@ AstrBot WebUI → 插件市场 → 搜索「模型一键切换」→ 安装。
 ```
 
 ```text
-✅ 测试成功：grok/grok-4.7 返回 OK
+✅ 测试成功：backup/claude-sonnet 返回 OK
 ```
 
 失败时会带上异常类型，方便判断是 key 错了还是网络不通：
 
 ```text
-❌ 测试失败：grok/grok-4.7 ConnectError: Connection error.
+❌ 测试失败：backup/claude-sonnet ConnectError: Connection error.
 ```
 
 ### 6. 在配置页切换（不用发消息）
@@ -205,6 +205,6 @@ WebUI → 插件 → 模型一键切换：
 
 见 [CHANGELOG.md](CHANGELOG.md)
 
-## 作者
+## 反馈
 
-君莫笑（HongJian0001）
+有问题欢迎在仓库的 Issues 里反馈。

@@ -1,5 +1,12 @@
 # 更新日志
 
+## 1.2.2 - 2026-11-26
+
+- README 示例改用通用模型名（gpt-4o-mini / claude-sonnet / qwen3-32b），不再使用真实线路
+- 移除示例中的 QQ 号与昵称，删除作者段落
+- 示例保留后台插件名（humanoid_core / livingmemory / autonomous_social / clonetts 等）
+- 仓库提交统一使用 GitHub noreply 邮箱
+
 ## 1.2.1 - 2026-11-25
 
 - 列表和状态改用「provider 源名称 · 模型名」显示，不再显示原始模型 id

@@ -12,7 +12,7 @@ desc: |
   - 配置页信息每 2 分钟自动重算，UI 增删 provider 后无需重载插件
   - /切换主模型 跟随 一次性清除写死模型；/切换主模型 状态 体检
   - 自动备份、读回校验、失败全量回滚；embedding/STT/TTS/omnidraw/qq_tools/rerank 不动
-version: 1.2.1
+version: 1.2.2
 author: 君莫笑
 repo: https://github.com/HongJian0001/astrbot_plugin_model_switch
 help: 发送 /切换主模型 查看可用模型；/切换主模型 状态 体检；/切换主模型 跟随 清除写死模型

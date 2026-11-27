@@ -10,6 +10,7 @@ import os
 import re
 import shutil
 import tempfile
+import time
 from datetime import datetime
 from typing import Any, AsyncGenerator
 
@@ -130,6 +131,7 @@ class ModelSwitchPlugin(Star):
         self.config = config or {}
         self._lock = asyncio.Lock()
         self._config_error = ""
+        self._fallback_notice = ""
         self._refresh_task: asyncio.Task | None = None
 
     def _path(self, name: str) -> str:
@@ -211,6 +213,114 @@ class ModelSwitchPlugin(Star):
                 out.append(pid)
         return (out or valid[:1])[:2]
 
+    def _configured_fallbacks(self) -> list[str]:
+        """插件配置里的备用列表；空列表表示「自动推导」。"""
+        raw = self.config.get("fallback_provider_ids") or []
+        if isinstance(raw, str):
+            raw = [x for x in re.split(r"[,，\s]+", raw) if x]
+        out: list[str] = []
+        for item in raw if isinstance(raw, list) else []:
+            pid = str(item or "").strip()
+            if pid and pid not in out:
+                out.append(pid)
+        return out
+
+    def _pick_fallbacks(self, ids: list[str], target: str) -> list[str]:
+        """按配置顺序过滤：必须存在、已启用、且不等于主模型。"""
+        valid = {p["id"] for p in self._catalog()}
+        out = []
+        for pid in ids:
+            if pid in valid and pid != target and pid not in out:
+                out.append(pid)
+        return out[:3]
+
+    def _runtime_fallbacks(self) -> list[str] | None:
+        """只读扫描进程对象，拿 pipeline stage 里真正生效的备用列表。
+
+        拿不到就返回 None，不影响其他功能。
+        """
+        try:
+            import gc
+        except Exception:
+            return None
+        try:
+            objs = gc.get_objects()
+        except Exception:
+            return None
+
+        def ids_of(cfg) -> list[str] | None:
+            try:
+                ids = getattr(cfg, "fallback_provider_ids", None)
+            except Exception:
+                return None
+            if isinstance(ids, list):
+                return [str(x) for x in ids]
+            return None
+
+        # 1) pipeline stage：ProcessStage -> AgentRequestSubStage -> InternalAgentSubStage
+        for obj in objs:
+            try:
+                if type(obj).__name__ != "InternalAgentSubStage":
+                    continue
+            except Exception:
+                continue
+            try:
+                got = ids_of(getattr(obj, "main_agent_cfg", None))
+            except Exception:
+                got = None
+            if got is not None:
+                return got
+
+        # 2) 兜底：直接找 MainAgentBuildConfig 实例
+        for obj in objs:
+            try:
+                if type(obj).__name__ != "MainAgentBuildConfig":
+                    continue
+            except Exception:
+                continue
+            got = ids_of(obj)
+            if got is not None:
+                return got
+        return None
+
+    def _stage_probe(self) -> str:
+        """调试用：报告进程内 pipeline stage 的扫描情况。"""
+        try:
+            import gc
+            objs = gc.get_objects()
+        except Exception as e:
+            return f"gc 扫描失败：{type(e).__name__}: {e}"
+        counts: dict[str, int] = {}
+        have_cfg = 0
+        for obj in objs:
+            try:
+                name = type(obj).__name__
+            except Exception:
+                continue
+            if name in ("InternalAgentSubStage", "AgentRequestSubStage", "ProcessStage", "MainAgentBuildConfig"):
+                counts[name] = counts.get(name, 0) + 1
+                if getattr(obj, "main_agent_cfg", None) is not None:
+                    have_cfg += 1
+        return f"对象总数 {len(objs)}；" + "、".join(f"{k}={v}" for k, v in counts.items()) + f"；带 main_agent_cfg={have_cfg}"
+
+    def _fallback_health(self) -> dict:
+        cfg_ids = g(self.context.get_config(), FALLBACK, []) or []
+        cfg_ids = [str(x) for x in cfg_ids if isinstance(x, str)]
+        inst_map = getattr(self.context.provider_manager, "inst_map", {}) or {}
+        return {
+            "configured": cfg_ids,
+            "runtime": self._runtime_fallbacks(),
+            "bad": [x for x in cfg_ids if x not in inst_map],
+            "ok": len([x for x in cfg_ids if x in inst_map]),
+            "total": len(cfg_ids),
+            "fixed": bool(self._configured_fallbacks()),
+        }
+
+    def _fmt_fb(self, ids: list[str], cat: dict) -> str:
+        if not ids:
+            return "未配置"
+        return "  ".join(f"{i}. {self._name(pid, cat)}" for i, pid in enumerate(ids, 1))
+
     def _plan(self, data: dict, target: dict, old_runtime: str) -> tuple[list[dict], list[str], list[str]]:
         cmd = data.get("cmd_config.json")
         if not isinstance(cmd, dict):
@@ -224,11 +334,19 @@ class ModelSwitchPlugin(Star):
         old_primary = g(cmd, PRIMARY)
         add("cmd_config.json", PRIMARY, "主对话链（agent_runner + 运行时）", old_primary, tid)
         fb = g(cmd, FALLBACK, [])
-        new_fb = self._fallbacks(fb if isinstance(fb, list) else [], tid, str(old_primary or ""), old_runtime)
+        configured = self._configured_fallbacks()
+        if configured:
+            new_fb = self._pick_fallbacks(configured, tid)
+            fb_label = "备用链（按插件配置）"
+        else:
+            new_fb = self._fallbacks(fb if isinstance(fb, list) else [], tid, str(old_primary or ""), old_runtime)
+            fb_label = "备用链（自动）"
         if isinstance(fb, list) or new_fb:
-            add("cmd_config.json", FALLBACK, "备用链（fallback_provider_ids）", fb, new_fb)
+            add("cmd_config.json", FALLBACK, f"{fb_label}（fallback_provider_ids）", fb, new_fb)
 
         skipped, notes = [], []
+        if configured and not new_fb:
+            notes.append("配置的备用模型都不可用（不存在或已停用），本次跳过")
         for spec in TEXT_FIELDS:
             name, path, label, kind = spec
             if data.get(name) is None or self._plugin_state(name) != "active":
@@ -629,8 +747,21 @@ class ModelSwitchPlugin(Star):
 
         cur_label = self._name(cur, cat) if cur else "未设置"
         cur_line = f"{cur_label}（{cur}）" if cur and cur_label != cur else cur_label
-        lines = ["📊 模型切换状态", f"当前全局：{cur_line}", f"备用模型：{self._fb_text()}",
-                 f"跟随全局：{follow} 项（仅启用插件的后台任务）"]
+        health = self._fallback_health()
+        mode = "插件固定" if health["fixed"] else "自动"
+        lines = ["📊 模型切换状态", f"当前全局：{cur_line}",
+                 f"备用链（{mode}）：{self._fmt_fb(health['configured'], cat)}"]
+        run_ids = health["runtime"]
+        if run_ids is None:
+            lines.append("运行中的备用链：读取失败（建议重启后确认）")
+        else:
+            same = run_ids == health["configured"]
+            lines.append(f"运行中的备用链：{self._fmt_fb(run_ids, cat)}" + ("" if same else "  ← 与配置不一致"))
+            if not same:
+                lines.append("  ⚠️ 运行中是启动时加载的旧值，重启 AstrBot 后才会用上面的配置")
+        bad = health["bad"]
+        lines.append(f"备用链可解析：{health['ok']}/{health['total']}" + (f"（失效：{'、'.join(bad)}）" if bad else ""))
+        lines.append(f"跟随全局：{follow} 项（仅启用插件的后台任务）")
         if drift:
             lines += [f"写死未跟随：{len(drift)} 项 ⚠️"] + [f"  · {x}" for x in drift[:8]]
             if len(drift) > 8:
@@ -670,7 +801,12 @@ class ModelSwitchPlugin(Star):
             last = "；".join(parts) or "无记录"
         except Exception:
             pass
-        summary = f"⚠️ {self._config_error}\n\n{status}" if self._config_error else status
+        bits = []
+        if self._config_error:
+            bits.append(f"⚠️ {self._config_error}")
+        if self._fallback_notice:
+            bits.append(f"ℹ️ {self._fallback_notice}")
+        summary = "\n\n".join(bits + [status]) if bits else status
         return {
             "current_model_info": f"{self._name(cur, cat)}（{cur}）" if cur else "未设置",
             "fallback_model_info": self._fb_text(),
@@ -718,6 +854,7 @@ class ModelSwitchPlugin(Star):
                         self._config_error = f"从配置页切换失败：{e}"
                         self.logger.warning("配置页切换模型失败: %s", e)
                 cur = self._current()
+            await self._sync_fallback(cur)
             await self._refresh_info(switch_value=cur)
         except Exception as e:
             self.logger.warning("初始化模型配置信息失败: %s", e)
@@ -753,6 +890,132 @@ class ModelSwitchPlugin(Star):
             except (asyncio.CancelledError, Exception):
                 pass
 
+    async def _sync_fallback(self, cur: str, *, operator: str = "插件配置") -> str:
+        """把插件配置里的备用列表写进 cmd_config；返回提示文案。"""
+        configured = self._configured_fallbacks()
+        if not configured:
+            return ""
+        data = self._load_all()
+        cmd = data.get("cmd_config.json")
+        if not isinstance(cmd, dict):
+            self._fallback_notice = "读取 cmd_config.json 失败，备用链未写入"
+            return self._fallback_notice
+        current = g(cmd, FALLBACK, [])
+        target = self._pick_fallbacks(configured, cur)
+        if not target:
+            self._fallback_notice = "配置的备用模型都不可用（不存在或已停用），未写入"
+            return self._fallback_notice
+        if list(current or []) == target:
+            return ""
+        changes = [{
+            "file": "cmd_config.json",
+            "path": FALLBACK,
+            "label": "备用链（按插件配置）",
+            "old": current,
+            "new": target,
+        }]
+        try:
+            await self._apply_changes(data, changes, switch_to=None, old_runtime=cur, verify_runtime=False)
+        except Exception as e:
+            self._fallback_notice = f"写入备用链失败：{e}"
+            return self._fallback_notice
+        self._fallback_notice = "备用链已按配置写入，重启 AstrBot 后生效"
+        try:
+            await self.put_kv_data("last_fallback", {
+                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "operator": operator,
+                "ids": target,
+            })
+        except Exception:
+            pass
+        return self._fallback_notice
+
+    async def _test_fallbacks(self, ids: list[str]) -> str:
+        if not ids:
+            return "没有配置备用模型。"
+        cat = {p["id"]: p for p in self._catalog()}
+        inst_map = getattr(self.context.provider_manager, "inst_map", {}) or {}
+        lines = ["🧪 备用链测试"]
+        for i, pid in enumerate(ids, 1):
+            name = self._name(pid, cat)
+            prov = inst_map.get(pid)
+            if prov is None:
+                lines.append(f"  {i}. {name}  ❌ provider 不存在")
+                continue
+            t0 = time.monotonic()
+            try:
+                resp = await asyncio.wait_for(
+                    prov.text_chat(prompt="ping", system_prompt="Reply with OK only.", request_max_retries=0),
+                    timeout=30,
+                )
+                txt = short(getattr(resp, "completion_text", "") or "", 30)
+                lines.append(f"  {i}. {name}  ✅ {txt or 'OK'}  {time.monotonic() - t0:.1f}s")
+            except Exception as e:
+                lines.append(f"  {i}. {name}  ❌ {type(e).__name__}: {short(str(e), 80)}")
+        return "\n".join(lines)
+
+    async def _cmd_fallback(self, args: list[str], operator: str) -> str:
+        cat = {p["id"]: p for p in self._catalog()}
+        h = self._fallback_health()
+        if not args:
+            run = h["runtime"]
+            lines = ["🔁 备用链",
+                     f"插件配置：{self._fmt_fb(h['configured'], cat)}",
+                     "运行中：" + ("读取失败（建议重启后确认）" if run is None else self._fmt_fb(run, cat)),
+                     f"可解析：{h['ok']}/{h['total']}" + (f"（失效：{'、'.join(h['bad'])}）" if h["bad"] else ""),
+                     "",
+                     "用法：",
+                     "  /切换主模型 备用 2 3     按顺序设为第 2、3 个模型",
+                     "  /切换主模型 备用 自动    恢复自动推导",
+                     "  /切换主模型 备用 测试    逐个真发 ping",
+                     "  /切换主模型 备用 调试    查看运行中列表的读取情况"]
+            return "\n".join(lines)
+
+        head = args[0]
+        if head in ("测试", "test"):
+            return await self._test_fallbacks(h["configured"] or (h["runtime"] or []))
+
+        if head in ("调试", "debug"):
+            return "🔍 " + self._stage_probe()
+
+        if head in ("自动", "auto"):
+            self.config["fallback_provider_ids"] = []
+            if hasattr(self.config, "save_config"):
+                try:
+                    self.config.save_config()
+                except Exception as e:
+                    self.logger.warning("保存备用配置失败: %s", e)
+            self._fallback_notice = "已切回自动模式（下次切换时自动推导），当前备用链保持不变"
+            await self._refresh_info()
+            return "✅ 已切回自动模式。\n" + self._fallback_notice
+
+        ids: list[str] = []
+        for token in args:
+            try:
+                p = self._resolve(token)
+            except ValueError as e:
+                return f"❌ {e}"
+            if p["id"] not in ids:
+                ids.append(p["id"])
+        if len(ids) > 3:
+            return "❌ 最多设置 3 个备用模型。"
+        cur = self._current()
+        ids = [x for x in ids if x != cur]
+        if not ids:
+            return "❌ 备用模型不能和主模型相同。"
+
+        self.config["fallback_provider_ids"] = ids
+        if hasattr(self.config, "save_config"):
+            try:
+                self.config.save_config()
+            except Exception as e:
+                return f"❌ 保存配置失败：{e}"
+
+        note = await self._sync_fallback(cur, operator=operator)
+        await self._refresh_info()
+        body = "\n".join(f"  {i}. {self._name(pid, cat)}" for i, pid in enumerate(ids, 1))
+        return "✅ 已设置备用链：\n" + body + ("\n\n" + note if note else "\n\n配置与当前一致，无需写入。")
+
     @filter.command("切换主模型")
     async def cmd_model_switch(self, event: AstrMessageEvent) -> AsyncGenerator[Any, None]:
         """切换全局主模型。"""
@@ -785,6 +1048,9 @@ class ModelSwitchPlugin(Star):
             return
         operator = f"{event.get_sender_name()}({event.get_sender_id()})"
         async with self._lock:
+            if sub in ("备用", "fallback", "fb"):
+                yield event.plain_result(await self._cmd_fallback(parts[1:], operator))
+                return
             if sub in ("测试", "test"):
                 pid = self._current()
                 prov = getattr(self.context.provider_manager, "inst_map", {}).get(pid)

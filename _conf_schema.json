@@ -6,6 +6,14 @@
     "_special": "select_provider",
     "default": ""
   },
+  "fallback_provider_ids": {
+    "description": "备用模型（按顺序尝试）",
+    "hint": "主模型请求失败时按顺序切换；最多 3 个。留空=插件自动推导。修改后需重启 AstrBot 才会被对话链路加载。",
+    "type": "list",
+    "items": {"type": "string"},
+    "_special": "select_providers",
+    "default": []
+  },
   "current_model_info": {
     "description": "当前主模型",
     "type": "string",

@@ -257,6 +257,42 @@ class ModelSwitchPlugin(Star):
                 return [str(x) for x in ids]
             return None
 
+        def ids_from_stage(stage) -> list[str] | None:
+            """ProcessStage -> AgentRequestSubStage -> InternalAgentSubStage -> main_agent_cfg"""
+            node = stage
+            for _ in range(4):
+                if node is None:
+                    return None
+                try:
+                    cfg = getattr(node, "main_agent_cfg", None)
+                except Exception:
+                    cfg = None
+                got = ids_of(cfg)
+                if got is not None:
+                    return got
+                try:
+                    node = getattr(node, "agent_sub_stage", None)
+                except Exception:
+                    return None
+            return None
+
+        # 0) 最可靠：走 core lifecycle 当前的 pipeline_scheduler_mapping
+        for obj in objs:
+            try:
+                if type(obj).__name__ != "AstrBotCoreLifecycle":
+                    continue
+            except Exception:
+                continue
+            try:
+                mapping = getattr(obj, "pipeline_scheduler_mapping", {}) or {}
+                scheduler = mapping.get("default") or next(iter(mapping.values()), None)
+                for st in list(getattr(scheduler, "stages", []) or []):
+                    got = ids_from_stage(st)
+                    if got is not None:
+                        return got
+            except Exception:
+                continue
+
         # 1) pipeline stage：ProcessStage -> AgentRequestSubStage -> InternalAgentSubStage
         for obj in objs:
             try:
@@ -297,11 +333,39 @@ class ModelSwitchPlugin(Star):
                 name = type(obj).__name__
             except Exception:
                 continue
-            if name in ("InternalAgentSubStage", "AgentRequestSubStage", "ProcessStage", "MainAgentBuildConfig"):
+            if name in ("InternalAgentSubStage", "AgentRequestSubStage", "ProcessStage", "MainAgentBuildConfig", "AstrBotCoreLifecycle"):
                 counts[name] = counts.get(name, 0) + 1
                 if getattr(obj, "main_agent_cfg", None) is not None:
                     have_cfg += 1
         return f"对象总数 {len(objs)}；" + "、".join(f"{k}={v}" for k, v in counts.items()) + f"；带 main_agent_cfg={have_cfg}"
+
+    async def _reload_pipeline(self) -> tuple[bool, str]:
+        """重建 pipeline，让 cmd_config 里的备用链立刻生效。"""
+        try:
+            import gc
+            objs = gc.get_objects()
+        except Exception as e:
+            return False, f"gc 扫描失败：{type(e).__name__}: {e}"
+        lc = None
+        for obj in objs:
+            try:
+                if type(obj).__name__ == "AstrBotCoreLifecycle":
+                    lc = obj
+                    break
+            except Exception:
+                continue
+        if lc is None:
+            return False, "找不到 AstrBotCoreLifecycle"
+        mapping = getattr(lc, "pipeline_scheduler_mapping", None)
+        if not isinstance(mapping, dict) or not mapping:
+            return False, "pipeline_scheduler_mapping 不可用"
+        conf_ids = list(mapping.keys())
+        try:
+            for cid in conf_ids:
+                await lc.reload_pipeline_scheduler(cid)
+        except Exception as e:
+            return False, f"重建失败：{type(e).__name__}: {e}"
+        return True, f"已重建 {len(conf_ids)} 个 pipeline"
 
     def _fallback_health(self) -> dict:
         cfg_ids = g(self.context.get_config(), FALLBACK, []) or []
@@ -968,6 +1032,7 @@ class ModelSwitchPlugin(Star):
                      "  /切换主模型 备用 2 3     按顺序设为第 2、3 个模型",
                      "  /切换主模型 备用 自动    恢复自动推导",
                      "  /切换主模型 备用 测试    逐个真发 ping",
+                     "  /切换主模型 备用 生效    立即重建 pipeline",
                      "  /切换主模型 备用 调试    查看运行中列表的读取情况"]
             return "\n".join(lines)
 
@@ -977,6 +1042,19 @@ class ModelSwitchPlugin(Star):
 
         if head in ("调试", "debug"):
             return "🔍 " + self._stage_probe()
+
+        if head in ("生效", "apply", "reload"):
+            ok, msg = await self._reload_pipeline()
+            if not ok:
+                return f"❌ 自动生效失败：{msg}\n请到 WebUI 配置页点一次保存，或重启 AstrBot"
+            await asyncio.sleep(0.5)
+            h2 = self._fallback_health()
+            cat2 = {p["id"]: p for p in self._catalog()}
+            same = h2["runtime"] == h2["configured"]
+            await self._refresh_info()
+            lines = [f"✅ {msg}", f"运行中备用链：{self._fmt_fb(h2['runtime'] or [], cat2)}"]
+            lines.append("与配置一致 ✅" if same else "⚠️ 仍与配置不一致，建议重启 AstrBot")
+            return "\n".join(lines)
 
         if head in ("自动", "auto"):
             self.config["fallback_provider_ids"] = []
@@ -1012,9 +1090,19 @@ class ModelSwitchPlugin(Star):
                 return f"❌ 保存配置失败：{e}"
 
         note = await self._sync_fallback(cur, operator=operator)
-        await self._refresh_info()
         body = "\n".join(f"  {i}. {self._name(pid, cat)}" for i, pid in enumerate(ids, 1))
-        return "✅ 已设置备用链：\n" + body + ("\n\n" + note if note else "\n\n配置与当前一致，无需写入。")
+        ok, msg = await self._reload_pipeline()
+        if ok:
+            await asyncio.sleep(0.5)
+            h2 = self._fallback_health()
+            live = self._fmt_fb(h2["runtime"] or [], cat)
+            tail = f"✅ 已实时生效（{msg}）\n运行中备用链：{live}"
+            if h2["runtime"] != h2["configured"]:
+                tail += "\n⚠️ 读取结果仍与配置不一致，建议重启确认"
+        else:
+            tail = f"⚠️ 已写入配置，但自动生效失败：{msg}\n请到 WebUI 配置页点一次保存，或重启 AstrBot"
+        await self._refresh_info()
+        return "✅ 已设置备用链：\n" + body + "\n\n" + tail
 
     @filter.command("切换主模型")
     async def cmd_model_switch(self, event: AstrMessageEvent) -> AsyncGenerator[Any, None]:
